@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --color-canvas: #171717;
+  --color-forest: #06110C;
+  --color-surface: #202522;
+  --color-subtle: #102017;
+  --color-crimson: #A31C1B;
+  --color-crimson-hover: #831615;
+  --color-text-primary: #F2F2EF;
+  --color-text-secondary: #858B86;
+  --color-border: #26352D;
+}
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    color: var(--color-text-primary);
+    background-color: var(--color-canvas);
+  }
+
+  code,
+  pre,
+  .font-mono {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+}
+
+@layer components {
+  .surface-card {
+    @apply bg-surface border border-border rounded-xl shadow-card;
+  }
+
+  .input-base {
+    @apply w-full rounded-lg border border-border bg-canvas px-3.5 py-2.5 text-sm text-ink-primary placeholder:text-ink-secondary/75 transition-colors focus:border-ink-primary focus:outline-none focus:ring-1 focus:ring-ink-primary disabled:bg-forest disabled:cursor-not-allowed;
+  }
+
+  .label-base {
+    @apply block text-xs font-medium uppercase tracking-wider text-ink-secondary mb-1.5;
+  }
+}
