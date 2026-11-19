@@ -7,6 +7,7 @@ from app.schemas.job_schema import JobPostingRequest
 
 RiskLevel = Literal["LOW", "MEDIUM", "HIGH"]
 HeuristicSeverity = Literal["info", "warning", "alert"]
+SourceType = Literal["manual", "pdf_upload", "text_paste"]
 
 
 class PredictionPayload(BaseModel):
@@ -27,12 +28,26 @@ class HeuristicIndicatorSchema(BaseModel):
     severity: HeuristicSeverity
     description: str
     matched_field: str
+    evidence: Optional[str] = None
+    source_pages: List[int] = []
+    recommended_action: Optional[str] = None
+
+
+class DocumentMetadataSummary(BaseModel):
+    filename: Optional[str] = None
+    extraction_method: Optional[str] = None
+    missing_fields: List[str] = []
+    company_website: Optional[str] = None
+    company_email: Optional[str] = None
+    recruitment_email: Optional[str] = None
 
 
 class PredictionResponse(BaseModel):
     success: bool = True
     analysis_id: str
     created_at: datetime
+    source_type: SourceType = "manual"
+    document_meta: Optional[DocumentMetadataSummary] = None
     prediction: PredictionPayload
     model: ModelMetadata
     heuristics: List[HeuristicIndicatorSchema]
@@ -42,6 +57,8 @@ class PredictionResponse(BaseModel):
 class AnalysisRecordResponse(BaseModel):
     id: str
     created_at: datetime
+    source_type: SourceType = "manual"
+    document_meta: Optional[DocumentMetadataSummary] = None
     job_title: str
     company: str
     input: JobPostingRequest

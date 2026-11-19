@@ -10,6 +10,8 @@ import { predictionService } from '../services/predictionService';
 import type {
   AnalysisRecord,
   DashboardStatistics,
+  DocumentExtractionResponse,
+  JobInformationExtracted,
   JobPostingInput,
   RiskThresholds,
 } from '../types/analysis';
@@ -24,6 +26,10 @@ export interface AnalysisContextValue {
   isMockMode: boolean;
   statistics: DashboardStatistics;
   analyzePosting: (input: JobPostingInput) => Promise<AnalysisRecord>;
+  analyzeReviewedDocument: (
+    extraction: DocumentExtractionResponse,
+    reviewed: JobInformationExtracted
+  ) => Promise<AnalysisRecord>;
   getResultById: (id: string) => AnalysisRecord | undefined;
   deleteRecord: (id: string) => void;
   updateThresholds: (next: RiskThresholds) => void;
@@ -96,6 +102,40 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
+  const analyzeReviewedDocument = useCallback(
+    async (
+      extraction: DocumentExtractionResponse,
+      reviewed: JobInformationExtracted
+    ) => {
+      if (!predictionService.analyzeDocument) {
+        throw new Error(
+          'Document analysis requires the live FastAPI backend (set VITE_USE_MOCK_API=false).'
+        );
+      }
+      setIsAnalyzing(true);
+      setError(null);
+      try {
+        const record = await predictionService.analyzeDocument(
+          extraction,
+          reviewed
+        );
+        setHistory((prev) => [record, ...prev]);
+        setActiveResult(record);
+        return record;
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Unable to complete document analysis. Please try again.';
+        setError(message);
+        throw err;
+      } finally {
+        setIsAnalyzing(false);
+      }
+    },
+    []
+  );
+
   const getResultById = useCallback(
     (id: string) => history.find((item) => item.id === id),
     [history]
@@ -136,6 +176,7 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({
       isMockMode: predictionService.isMockMode,
       statistics,
       analyzePosting,
+      analyzeReviewedDocument,
       getResultById,
       deleteRecord,
       updateThresholds,
@@ -149,6 +190,7 @@ export const AnalysisProvider: React.FC<{ children: React.ReactNode }> = ({
       error,
       statistics,
       analyzePosting,
+      analyzeReviewedDocument,
       getResultById,
       deleteRecord,
       updateThresholds,

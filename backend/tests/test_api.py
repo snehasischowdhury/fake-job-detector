@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
-from app.core.model_loader import ModelLoadError
+from app.core.model_loader import ModelLoadError, ModelLoader
 from app.core.prediction_service import PredictionService
 from app.database.connection import init_db
 from app.database.repository import AnalysisRepository
@@ -57,13 +57,16 @@ def client():
         repository=AnalysisRepository(),
         settings=settings,
     )
+    app.state.rate_limiter.reset()
     with TestClient(app) as test_client:
         yield test_client
 
 
-def test_health_endpoint(client: TestClient):
+def test_health_and_security_headers(client: TestClient):
     res = client.get("/api/v1/health")
     assert res.status_code == 200
+    assert res.headers["X-Content-Type-Options"] == "nosniff"
+    assert res.headers["X-Frame-Options"] == "DENY"
     body = res.json()
     assert body["status"] == "healthy"
     assert body["model_loaded"] is True
@@ -92,6 +95,11 @@ def test_predict_valid_and_history_crud(client: TestClient):
     assert get_res.status_code == 200
     assert get_res.json()["job_title"] == "URGENT Remote Data Entry"
 
+    # Filter & search history
+    list_res = client.get("/api/v1/history?search=URGENT&risk_level=HIGH")
+    assert list_res.status_code == 200
+    assert list_res.json()["total"] >= 1
+
     # Statistics endpoint
     stats_res = client.get("/api/v1/statistics")
     assert stats_res.status_code == 200
@@ -102,13 +110,35 @@ def test_predict_valid_and_history_crud(client: TestClient):
     assert del_res.status_code == 200
     assert del_res.json()["deleted_id"] == analysis_id
 
+    # Verify 404 after deletion
+    assert client.get(f"/api/v1/history/{analysis_id}").status_code == 404
 
-def test_predict_rejects_short_description(client: TestClient):
-    res = client.post(
-        "/api/v1/predict",
-        json={"title": "Engineer", "description": "Too short"},
+
+def test_predict_rejects_empty_short_and_oversized_inputs(client: TestClient):
+    # Whitespace-only
+    assert (
+        client.post(
+            "/api/v1/predict",
+            json={"title": "   ", "description": "   "},
+        ).status_code
+        == 422
     )
-    assert res.status_code == 422
+    # Short description
+    assert (
+        client.post(
+            "/api/v1/predict",
+            json={"title": "Engineer", "description": "Too short"},
+        ).status_code
+        == 422
+    )
+    # Extremely long description (> 8000 chars)
+    assert (
+        client.post(
+            "/api/v1/predict",
+            json={"title": "Engineer", "description": "a" * 8005},
+        ).status_code
+        == 422
+    )
 
 
 def test_predict_returns_503_when_model_unavailable(client: TestClient):
@@ -128,3 +158,22 @@ def test_predict_returns_503_when_model_unavailable(client: TestClient):
         },
     )
     assert res.status_code == 503
+
+
+def test_model_loader_missing_file_raises():
+    loader = ModelLoader("models/does_not_exist.pkl")
+    with pytest.raises(ModelLoadError):
+        loader.load()
+
+
+def test_rate_limiter_enforces_429(client: TestClient):
+    client.app.state.rate_limiter.max_requests = 2
+    payload = {
+        "title": "Backend Engineer",
+        "description": "Build reliable FastAPI microservices and PostgreSQL migrations.",
+    }
+    assert client.post("/api/v1/predict", json=payload).status_code == 200
+    assert client.post("/api/v1/predict", json=payload).status_code == 200
+    res = client.post("/api/v1/predict", json=payload)
+    assert res.status_code == 429
+    assert "Retry-After" in res.headers

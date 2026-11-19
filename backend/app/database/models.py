@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -13,6 +14,14 @@ class JobAnalysisRecord(Base):
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
+    source_type: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="manual", index=True
+    )
+    original_filename: Mapped[Optional[str]] = mapped_column(String(150), nullable=True)
+    extraction_method: Mapped[Optional[str]] = mapped_column(String(24), nullable=True)
+    extracted_payload_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    extraction_metadata_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     job_title: Mapped[str] = mapped_column(String(150), nullable=False, index=True)
     company: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     submitted_payload_json: Mapped[str] = mapped_column(Text, nullable=False)

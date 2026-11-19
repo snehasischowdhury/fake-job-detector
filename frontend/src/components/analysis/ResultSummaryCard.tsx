@@ -31,6 +31,14 @@ export const ResultSummaryCard: React.FC<ResultSummaryCardProps> = ({
             {record.isDemonstration && (
               <Badge variant="demo">Demonstration Output</Badge>
             )}
+            {record.sourceType === 'pdf_upload' && record.documentMeta?.filename && (
+              <Badge variant="info">
+                PDF · {record.documentMeta.filename}
+              </Badge>
+            )}
+            {record.sourceType === 'text_paste' && (
+              <Badge variant="neutral">Pasted Job Text</Badge>
+            )}
           </div>
           <h2 className="mt-3 text-xl font-semibold text-ink-primary">
             {record.input.title}

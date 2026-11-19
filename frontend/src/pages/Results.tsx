@@ -97,13 +97,60 @@ export const Results: React.FC = () => {
         <AlertBanner
           variant="warning"
           title="Demonstration Result (Simulated ML Output)"
-          description="This prediction was generated locally using Phase 1 mock logic. Connect the FastAPI backend in Phase 5 for live job_detector.pkl inference."
+          description="This prediction was generated locally using mock logic. Connect the FastAPI backend for live job_detector.pkl inference."
         />
       )}
 
       <ResultSummaryCard record={record} thresholds={thresholds} />
 
       <HeuristicIndicatorsPanel indicators={record.heuristics} />
+
+      {record.documentMeta && (
+        <Card>
+          <h3 className="border-b border-border pb-3 text-base font-semibold text-ink-primary">
+            Extracted Document &amp; Company Details
+          </h3>
+          <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wider text-ink-secondary">
+                Source File &amp; Method
+              </dt>
+              <dd className="mt-1 font-mono text-xs text-ink-primary">
+                {record.documentMeta.filename || 'N/A'} ({record.documentMeta.extractionMethod || 'N/A'})
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wider text-ink-secondary">
+                Company Website
+              </dt>
+              <dd className="mt-1 text-ink-primary">
+                {record.documentMeta.companyWebsite || 'Not detected'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wider text-ink-secondary">
+                Recruitment / Company Email
+              </dt>
+              <dd className="mt-1 font-mono text-xs text-ink-primary">
+                {record.documentMeta.recruitmentEmail ||
+                  record.documentMeta.companyEmail ||
+                  'Not detected'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs font-medium uppercase tracking-wider text-ink-secondary">
+                Missing Core Fields
+              </dt>
+              <dd className="mt-1 text-xs text-ink-secondary">
+                {record.documentMeta.missingFields &&
+                record.documentMeta.missingFields.length > 0
+                  ? record.documentMeta.missingFields.join(', ')
+                  : 'None'}
+              </dd>
+            </div>
+          </dl>
+        </Card>
+      )}
 
       {/* Configurable Presentation Thresholds */}
       <Card>

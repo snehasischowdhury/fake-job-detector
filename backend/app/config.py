@@ -21,11 +21,20 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     max_request_bytes: int = 65536
+    max_upload_bytes: int = 10485760
+    max_pdf_pages: int = 25
+    ocr_min_chars_per_page: int = 60
+    ocr_dpi: int = 200
+    ocr_timeout_seconds: int = 20
+
+    rate_limit_requests: int = 30
+    rate_limit_window_seconds: int = 60
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        protected_namespaces=("settings_",),
     )
 
     @property

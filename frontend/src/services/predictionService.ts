@@ -1,7 +1,9 @@
 import type {
   AnalysisRecord,
   DashboardStatistics,
+  DocumentExtractionResponse,
   HeuristicIndicator,
+  JobInformationExtracted,
   JobPostingInput,
   MlPredictionOutput,
   RiskThresholds,
@@ -9,11 +11,20 @@ import type {
 import { classifyRiskLevel } from '../utils/riskThresholds';
 
 /**
- * Contract shared between the Phase 1 Mock service and the Phase 5 FastAPI HTTP client.
+ * Contract shared between the Phase 1 Mock service and the live FastAPI HTTP client.
  */
 export interface PredictionApiClient {
   readonly isMockMode: boolean;
   analyzeJob(input: JobPostingInput): Promise<AnalysisRecord>;
+  extractDocument?(
+    file: File,
+    onUploadProgress?: (percent: number) => void
+  ): Promise<DocumentExtractionResponse>;
+  extractRawText?(rawText: string): Promise<DocumentExtractionResponse>;
+  analyzeDocument?(
+    extraction: DocumentExtractionResponse,
+    reviewed: JobInformationExtracted
+  ): Promise<AnalysisRecord>;
   fetchHistory?(initialFallback: AnalysisRecord[]): Promise<AnalysisRecord[]>;
   fetchRecordById?(id: string): Promise<AnalysisRecord | undefined>;
   deleteRecord?(id: string): Promise<void>;
@@ -25,7 +36,7 @@ export interface PredictionApiClient {
 }
 
 /**
- * Independent, transparent heuristic rule engine (Phase 1 local demo mirror).
+ * Independent, transparent heuristic rule engine (local demo mirror).
  * Evaluates explicit text/metadata patterns without modifying the ML score.
  */
 export function evaluateHeuristicIndicators(
@@ -181,11 +192,12 @@ class MockPredictionService implements PredictionApiClient {
       id: `demo-${Date.now().toString(36)}`,
       createdAt: new Date().toISOString(),
       isDemonstration: true,
+      sourceType: 'manual',
       input,
       mlPrediction,
       heuristics,
       disclaimer:
-        'Demonstration Mode: This score is simulated in the browser for Phase 1 UI validation. Connect FastAPI for live job_detector.pkl inference.',
+        'Demonstration Mode: This score is simulated in the browser. Connect FastAPI for live job_detector.pkl inference.',
     };
   }
 
@@ -245,6 +257,15 @@ interface BackendPredictionResponse {
   success: boolean;
   analysis_id: string;
   created_at: string;
+  source_type?: 'manual' | 'pdf_upload' | 'text_paste';
+  document_meta?: {
+    filename?: string;
+    extraction_method?: 'pdf_text' | 'ocr' | 'mixed' | 'text_paste';
+    missing_fields?: string[];
+    company_website?: string | null;
+    company_email?: string | null;
+    recruitment_email?: string | null;
+  } | null;
   prediction: {
     label: 'Legitimate' | 'Potentially Fraudulent';
     predicted_class: 0 | 1;
@@ -261,6 +282,9 @@ interface BackendPredictionResponse {
     severity: 'info' | 'warning' | 'alert';
     description: string;
     matched_field: string;
+    evidence?: string;
+    source_pages?: number[];
+    recommended_action?: string;
   }[];
   disclaimer: string;
 }
@@ -268,6 +292,8 @@ interface BackendPredictionResponse {
 interface BackendRecordResponse {
   id: string;
   created_at: string;
+  source_type?: 'manual' | 'pdf_upload' | 'text_paste';
+  document_meta?: BackendPredictionResponse['document_meta'];
   job_title: string;
   company: string;
   input: {
@@ -309,11 +335,41 @@ function toBackendPayload(input: JobPostingInput) {
   };
 }
 
+function mapHeuristics(
+  items: BackendPredictionResponse['heuristics']
+): HeuristicIndicator[] {
+  return items.map((h) => ({
+    id: h.id,
+    title: h.title,
+    severity: h.severity,
+    description: h.description,
+    matchedField:
+      h.matched_field === 'company_profile' ? 'companyProfile' : h.matched_field,
+    evidence: h.evidence,
+    sourcePages: h.source_pages,
+    recommendedAction: h.recommended_action,
+  }));
+}
+
+function mapDocMeta(meta: BackendPredictionResponse['document_meta']) {
+  if (!meta) return undefined;
+  return {
+    filename: meta.filename,
+    extractionMethod: meta.extraction_method,
+    missingFields: meta.missing_fields,
+    companyWebsite: meta.company_website,
+    companyEmail: meta.company_email,
+    recruitmentEmail: meta.recruitment_email,
+  };
+}
+
 function fromBackendRecord(rec: BackendRecordResponse): AnalysisRecord {
   return {
     id: rec.id,
     createdAt: rec.created_at,
     isDemonstration: false,
+    sourceType: rec.source_type ?? 'manual',
+    documentMeta: mapDocMeta(rec.document_meta),
     input: {
       title: rec.input.title,
       companyProfile: rec.input.company_profile ?? '',
@@ -336,21 +392,52 @@ function fromBackendRecord(rec: BackendRecordResponse): AnalysisRecord {
       modelName: rec.model.name,
       modelVersion: rec.model.version,
     },
-    heuristics: rec.heuristics.map((h) => ({
-      id: h.id,
-      title: h.title,
-      severity: h.severity,
-      description: h.description,
-      matchedField: (h.matched_field === 'company_profile'
-        ? 'companyProfile'
-        : h.matched_field) as HeuristicIndicator['matchedField'],
-    })),
+    heuristics: mapHeuristics(rec.heuristics),
     disclaimer: rec.disclaimer,
   };
 }
 
+function reviewedToInput(reviewed: JobInformationExtracted): JobPostingInput {
+  return {
+    title: reviewed.jobTitle.value || 'Untitled Job Posting',
+    companyProfile: [
+      reviewed.companyName.value,
+      reviewed.companyWebsite.value,
+      reviewed.companyAddress.value,
+    ]
+      .filter(Boolean)
+      .join(' — '),
+    location: reviewed.location.value ?? '',
+    department: reviewed.department.value ?? '',
+    salaryRange: reviewed.salaryRange.value ?? '',
+    description: [
+      reviewed.jobDescription.value,
+      reviewed.responsibilities.value,
+      reviewed.applicationInstructions.value,
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
+    requirements: [
+      reviewed.qualifications.value,
+      reviewed.skills.value,
+      reviewed.requiredExperience.value,
+      reviewed.requiredEducation.value,
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    benefits: [reviewed.benefits.value, reviewed.incentives.value]
+      .filter(Boolean)
+      .join('\n'),
+    employmentType: reviewed.employmentType.value ?? '',
+    requiredExperience: reviewed.requiredExperience.value ?? '',
+    requiredEducation: reviewed.requiredEducation.value ?? '',
+    industry: reviewed.industry.value ?? '',
+    functionArea: '',
+  };
+}
+
 /**
- * Phase 5 Live FastAPI HTTP Client.
+ * Live FastAPI HTTP Client.
  */
 class HttpPredictionService implements PredictionApiClient {
   readonly isMockMode = false;
@@ -381,6 +468,8 @@ class HttpPredictionService implements PredictionApiClient {
       id: data.analysis_id,
       createdAt: data.created_at,
       isDemonstration: false,
+      sourceType: data.source_type ?? 'manual',
+      documentMeta: mapDocMeta(data.document_meta),
       input,
       mlPrediction: {
         label: data.prediction.label,
@@ -389,15 +478,118 @@ class HttpPredictionService implements PredictionApiClient {
         modelName: data.model.name,
         modelVersion: data.model.version,
       },
-      heuristics: data.heuristics.map((h) => ({
-        id: h.id,
-        title: h.title,
-        severity: h.severity,
-        description: h.description,
-        matchedField: (h.matched_field === 'company_profile'
-          ? 'companyProfile'
-          : h.matched_field) as HeuristicIndicator['matchedField'],
-      })),
+      heuristics: mapHeuristics(data.heuristics),
+      disclaimer: data.disclaimer,
+    };
+  }
+
+  extractDocument(
+    file: File,
+    onUploadProgress?: (percent: number) => void
+  ): Promise<DocumentExtractionResponse> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${this.baseUrl}/documents/extract`);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onUploadProgress) {
+          const pct = Math.round((event.loaded / event.total) * 100);
+          onUploadProgress(pct);
+        }
+      };
+
+      xhr.onload = () => {
+        onUploadProgress?.(100);
+        try {
+          const parsed = JSON.parse(xhr.responseText);
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(parsed as DocumentExtractionResponse);
+          } else {
+            reject(
+              new Error(
+                parsed?.error ||
+                  parsed?.detail ||
+                  `Document extraction failed (${xhr.status})`
+              )
+            );
+          }
+        } catch {
+          reject(new Error(`Document extraction failed (${xhr.status})`));
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error('Network error while uploading PDF to backend.'));
+      };
+
+      const formData = new FormData();
+      formData.append('file', file);
+      xhr.send(formData);
+    });
+  }
+
+  async extractRawText(rawText: string): Promise<DocumentExtractionResponse> {
+    const response = await fetch(`${this.baseUrl}/documents/extract-text`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: rawText }),
+    });
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => null);
+      throw new Error(
+        errBody?.error ||
+          errBody?.detail ||
+          `Text extraction error (${response.status})`
+      );
+    }
+    return (await response.json()) as DocumentExtractionResponse;
+  }
+
+  async analyzeDocument(
+    extraction: DocumentExtractionResponse,
+    reviewed: JobInformationExtracted
+  ): Promise<AnalysisRecord> {
+    const sourceType =
+      extraction.extractionMethod === 'text_paste' ? 'text_paste' : 'pdf_upload';
+
+    const response = await fetch(`${this.baseUrl}/documents/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: extraction.filename,
+        extractionMethod: extraction.extractionMethod,
+        sourceType,
+        missingFields: extraction.missingFields,
+        rawExtracted: extraction.jobInformation,
+        reviewed,
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => null);
+      throw new Error(
+        errBody?.error ||
+          errBody?.detail ||
+          `Document analysis error (${response.status})`
+      );
+    }
+
+    const data = (await response.json()) as BackendPredictionResponse;
+    return {
+      id: data.analysis_id,
+      createdAt: data.created_at,
+      isDemonstration: false,
+      sourceType: data.source_type ?? sourceType,
+      documentMeta: mapDocMeta(data.document_meta),
+      input: reviewedToInput(reviewed),
+      mlPrediction: {
+        label: data.prediction.label,
+        predictedClass: data.prediction.predicted_class,
+        score: data.prediction.score,
+        modelName: data.model.name,
+        modelVersion: data.model.version,
+      },
+      heuristics: mapHeuristics(data.heuristics),
       disclaimer: data.disclaimer,
     };
   }
